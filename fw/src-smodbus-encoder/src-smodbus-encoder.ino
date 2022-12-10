@@ -1,51 +1,54 @@
 /*
- ModbusRTU.h from https://github.com/emelianov/modbus-esp8266
- Used NodeMCU ESP8266
+ Прошивка для платы NodeMCU на ESP8266, в других платах надо будет изменить
+ конфигурацию пинов Дополнительно установить библиотеки: modbus-esp8266 и
+ SimpleTimer
 */
 
 #include <ModbusRTU.h>
+#include <SimpleTimer.h>
 
-#define REG_BUTTON 0
-#define REG_BUTTON_COUNT 1
-#define REG_ENCODER 2
-#define SLAVE_ID 1
-#define RXTX_PIN D3
-#define PIN_A D0
-#define PIN_B D1
-#define PIN_BUTTON D2
+// Адреса Modbus регистров
+#define REG_BUTTON 0       // состояние кнопки
+#define REG_BUTTON_COUNT 1 // счётчик нажатий на кнопку
+#define REG_ENCODER 2      // состояние энкодера
+
+#define SLAVE_ID 1 // Modbus адрес устройства
+
+// конфигурация пинов
+#define FLOW_PIN D3 // пин контроля направления приёма/передачи
+#define PIN_A D0      // сигнал A энкодера
+#define PIN_B D1      // сигнал B энкодера
+#define PIN_BUTTON D2 // сигнал состояния кнопки
 
 ModbusRTU mb;
+SimpleTimer firstTimer(5); // запускаем таймер, который будем использовать для
+                           // опроса кнопок и энкодера
 
-boolean buttonWasUp = true;
-int encoderValue = 0;
-int buttonCount = 0;
-int fadeAmount = 10;        // the step of changing the value in the register
-unsigned long currentTime;
-unsigned long loopTime;
-unsigned char encoder_A;
-unsigned char encoder_B;
-unsigned char encoder_A_prev=0;
+boolean buttonWasUp = true; // флаг того, что кнопка отпущена
+int encoderValue = 0;       // значение энкодера
+int buttonCount = 0;        // счётчик нажатий на кнопку
+int fadeAmount =
+    10; // шаг, с которым будет изменяться значение энкодера в регистре
+unsigned char encoder_A, encoder_B,
+    encoder_A_prev = 0; // состояние сигналов энкодера
 
 void setup() {
-  Serial.begin(115200, SERIAL_8N2);
+  Serial.begin(115200, SERIAL_8N2); // задаём парамеры связи
   mb.begin(&Serial);
-  mb.begin(&Serial, RXTX_PIN);  //use RX/TX direction control pin
-  
+  mb.begin(&Serial, FLOW_PIN); // включаем контроль направления приёма/передачи
+
   mb.slave(SLAVE_ID);
   mb.addHreg(REG_ENCODER);
   mb.addHreg(REG_BUTTON_COUNT);
   mb.addCoil(REG_BUTTON);
-  
+
   mb.Hreg(REG_ENCODER, encoderValue);
   mb.Hreg(REG_BUTTON_COUNT, 0);
   mb.Coil(REG_BUTTON, 0);
 
   pinMode(PIN_A, INPUT);
-  pinMode(PIN_B, INPUT);  
+  pinMode(PIN_B, INPUT);
   pinMode(PIN_BUTTON, INPUT_PULLUP);
-
-  currentTime = millis();
-  loopTime = currentTime;   
 }
 
 void loop() {
@@ -54,43 +57,48 @@ void loop() {
 }
 
 void yield() {
-  currentTime = millis();
-  if(currentTime >= (loopTime + 5)){ // check every 5ms (200 Hz)
+  if (firstTimer.isReady()) {
+    checkEncoder();
+    checkButton();
+    firstTimer.reset();
+  }
+}
 
-    // ENCODER
-    encoder_A = digitalRead(PIN_A);     // check pin A
-    encoder_B = digitalRead(PIN_B);     // check pin B
-    if((!encoder_A) && (encoder_A_prev)){    // if the state has changed from positive to zero
-      if(encoder_B) {
-        // clockwise rotation — increment the value in the register
-        if(encoderValue + fadeAmount <= 100) encoderValue += fadeAmount;               
-      }   
-      else {
-        // counterclockwise rotation — decrement the value in the register
-        // 
-        if(encoderValue - fadeAmount >= 0) encoderValue -= fadeAmount;               
-      }   
+void checkButton() {
+  if (buttonWasUp && !digitalRead(PIN_BUTTON)) {
+    buttonCount++; // увеличиваем счётчик нажатий
 
-    }   
-    encoder_A_prev = encoder_A;     //  save the value of pin A for the next cycle
+    mb.Coil(REG_BUTTON, 1); // записываем в регистр состояния кнопка 1
+    mb.Hreg(REG_BUTTON_COUNT,
+            buttonCount); // записываем в регистр значение счётчика нажатий
+  } else {
+    if (buttonWasUp) {
+      mb.Coil(REG_BUTTON, 0); // записываем в регистр состояния кнопка 0
+    }
+  }
 
-    mb.Hreg(REG_ENCODER, encoderValue);    
+  buttonWasUp = digitalRead(PIN_BUTTON); // сохраняем флаг, что кнопка отпущена
+}
 
-    // BUTTON
-    if (buttonWasUp && !digitalRead(PIN_BUTTON)) {
-      delay(10);
-      if (!digitalRead(PIN_BUTTON)){
-        buttonCount++;
-        
-        mb.Coil(REG_BUTTON, 1);    
-        mb.Hreg(REG_BUTTON_COUNT, buttonCount);                  
-        }
-      } else {
-        if (buttonWasUp)
-          mb.Coil(REG_BUTTON, 0); 
-      }
-        
-    buttonWasUp = digitalRead(PIN_BUTTON);    
-    loopTime = currentTime;  
-  } 
+void checkEncoder() {
+  encoder_A = digitalRead(PIN_A); // проверяем сигнал A
+  encoder_B = digitalRead(PIN_B); // проверяем сигнал B
+
+  if ((!encoder_A) &&
+      (encoder_A_prev)) { //   //Если уровень сигнала А низкий, и в предыдущем
+                          //   цикле он был высокий
+    if (encoder_B) {
+      // вращение по часовой стрелке — увеличиваем значение в регистре
+      if (encoderValue + fadeAmount <= 100)
+        encoderValue += fadeAmount;
+    } else {
+      // вращение против часовой стрелки — уменьшаем значение в регистре
+      if (encoderValue - fadeAmount >= 0)
+        encoderValue -= fadeAmount;
+    }
+  }
+
+  encoder_A_prev =
+      encoder_A; // сохраняем состояние сигнала A для следующего цикла
+  mb.Hreg(REG_ENCODER, encoderValue); // отправляем текущее значение энкодера
 }
