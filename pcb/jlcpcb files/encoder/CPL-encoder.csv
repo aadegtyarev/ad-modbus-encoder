@@ -1,0 +1,9 @@
+Designator,Val,Package,Mid X,Mid Y,Rotation,Layer
+C1,100nF,C_0805_2012Metric,127.254,-99.441,0.0,bottom
+C2,100nF,C_0805_2012Metric,112.649,-110.363,180.0,bottom
+R1,10k,R_0805_2012Metric,117.602,-105.283,180.0,bottom
+R2,10k,R_0805_2012Metric,117.602,-108.331,180.0,bottom
+R3,10k,R_0805_2012Metric,117.602,-102.235,180.0,bottom
+R4,10k,R_0805_2012Metric,117.602,-99.441,0.0,bottom
+R5,10k,R_0805_2012Metric,122.174,-104.521,180.0,bottom
+SW1,RotaryEncoder_Switch,RotaryEncoder_Alps_EC11E-Switch_Vertical_H20mm_CircularMountingHoles,113.781,-102.783,0.0,top

@@ -1,0 +1,14 @@
+Designator,Val,Package,Mid X,Mid Y,Rotation,Layer
+C1,470mF,CP_Radial_D6.3mm_P2.50mm,125.524,-116.698,0.0,top
+C2,10uF,C_0805_2012Metric,123.492,-118.73,180.0,bottom
+C3,100nF,C_0805_2012Metric,110.538,-116.19,180.0,bottom
+J1,RS-485,TerminalBlock_bornier-4_P5.08mm,135.2,-112.5,-90.0,top
+J2,Encoder,PinHeader_1x05_P2.54mm_Vertical,128.773,-111.506,-90.0,top
+R1,10k,R_0805_2012Metric,110.538,-123.302,180.0,bottom
+R2,10k,R_0805_2012Metric,108.76,-125.842,180.0,bottom
+R3,10k,R_0805_2012Metric,104.2,-118.0,90.0,bottom
+R4,10k,R_0805_2012Metric,105.2,-122.5,0.0,bottom
+R5,120,R_0805_2012Metric,131.62,-114.92,270.0,bottom
+U1,Mini-360_DCDC_LM2596_module,Mini-360_DCDC_LM2596_module,123.952,-128.524,270.0,bottom
+U2,ESP-12E,ESP-12E,107.442,-125.976,180.0,top
+U3,MAX485E,DIP-8_W8.89mm_SMDSocket_LongPads,124.206,-127.62,90.0,top

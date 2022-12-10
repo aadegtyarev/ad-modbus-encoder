@@ -1,0 +1,10 @@
+Comment,Designator,Footprint,LCSC
+Conn_01x05,J1,SolderWire-0.1sqmm_1x05_P3.6mm_D0.4mm_OD1mm,
+RotaryEncoder_Switch,SW1,RotaryEncoder_Alps_EC11E-Switch_Vertical_H20mm_CircularMountingHoles,
+10k,R5,R_0805_2012Metric,
+10k,R2,R_0805_2012Metric,
+10k,R4,R_0805_2012Metric,
+100nF,C2,C_0805_2012Metric,
+10k,R1,R_0805_2012Metric,
+10k,R3,R_0805_2012Metric,
+100nF,C1,C_0805_2012Metric,
