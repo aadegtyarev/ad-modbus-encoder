@@ -11,6 +11,6 @@ Files for ordering boards in jlcpcb are located in the `pcb/jlcpcb files` folder
 
 ### PCB source files
 To edit sources you need:
-1. [https://www.kicad.org/](KiCad) — development environment.
+1. [KiCad](https://www.kicad.org/) — development environment.
 2. Mini-360_DCDC_LM2596_module.kicad_mod — footprint для Mini-360. Located in the `pcb/src/modules` folder.
-3. [https://github.com/Bouni/kicad-jlcpcb-tools](kicad-jlcpcb-tools)
+3. [kicad-jlcpcb-tools](https://github.com/Bouni/kicad-jlcpcb-tools) — generating files for jlcpcb.
