@@ -1,5 +1,5 @@
 # ad-modbus-encoder
-Modbus Encoder
+Modbus Encoder on ESP8266
 
 ## Firmware
 The firmware is written in the Arduino environment, the sources are in the `fw/src-smodbus-encoder` folder.
