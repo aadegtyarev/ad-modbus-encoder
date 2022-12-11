@@ -103,8 +103,8 @@ void modbus_setup() {
   mb.Hreg(REG_BAUDRATE, baudrateValue);
   mb.Coil(REG_BUTTON, 0);
 
-  mb.addHreg(99); //debug
-  mb.Hreg(99, 0);
+//  mb.addHreg(99); //debug
+//  mb.Hreg(99, 0);
 
   mb.onSetHreg(REG_SLAVE_ID, callback_set);
   mb.onSetHreg(REG_BAUDRATE, callback_set);
@@ -122,9 +122,6 @@ uint16_t callback_set(TRegister* reg, uint16_t val) {
       uint16_t correctBaudRates[] = {12, 24, 48, 96, 192, 384, 576, 1152};
       if (contains(val, correctBaudRates, 8)) {
         write_settings(EEPROM_BAUDRATE, val);
-        mb.Hreg(99, val);
-      } else {
-        mb.Hreg(99, 2);
       }
       break;
   }
