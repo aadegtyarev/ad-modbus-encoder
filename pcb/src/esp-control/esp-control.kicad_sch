@@ -5,8 +5,10 @@
   (paper "A4")
 
   (title_block
-    (date "2022-12-04")
+    (date "2022-12-11")
+    (rev "1.0")
     (company "Degtyarev A.")
+    (comment 2 "https://github.com/wb-adegtyarev/ad-modbus-encoder.git")
   )
 
   (lib_symbols
