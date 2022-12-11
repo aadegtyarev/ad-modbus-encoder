@@ -25,6 +25,7 @@
 #define PIN_A 12      // D6 сигнал A энкодера
 #define PIN_B 13      // D7 сигнал B энкодера
 #define PIN_BUTTON 14 // D5 состояние кнопки
+#define PIN_RESET_UART_BUTTON PIN_BUTTON // сброс настроек UART: скорость и адрес
 
 ModbusRTU mb;
 SimpleTimer firstTimer(5); // запускаем таймер, который будем использовать для
@@ -32,7 +33,7 @@ SimpleTimer firstTimer(5); // запускаем таймер, который б
 
 uint8_t slaveId = 1; // modbus адрес устройства
 uint16_t baudrateValue = 96; // скорость подключения modbus
-boolean buttonWasUp = true; // флаг того, что кнопка отпущена
+bool buttonWasUp = true; // флаг того, что кнопка отпущена
 int16_t encoderValue = 0;       // значение энкодера
 uint16_t buttonCount = 0;        // счётчик нажатий на кнопку
 uint8_t fadeAmount =
@@ -41,12 +42,15 @@ int16_t encoderA, encoderB,
         encoderAPrev = 0; // состояние сигналов энкодера
 
 void setup() {
-  read_settings();
-  modbus_setup();
-
   pinMode(PIN_A, INPUT);
   pinMode(PIN_B, INPUT);
   pinMode(PIN_BUTTON, INPUT_PULLUP);
+
+  EEPROM.begin(EEPROM_SIZE);
+
+  check_reset_uart_button(); // проверяем, не нужно ли сбросить настройки UART
+  read_settings(); // читаем настройки и заносим их в переменные
+  modbus_setup(); // инициализируем modbus: описываем подключение, создаём регистры
 }
 
 void loop() {
@@ -55,23 +59,20 @@ void loop() {
 }
 
 void yield() {
-  if (firstTimer.isReady()) {
-    check_encoder();
-    check_button();
-    firstTimer.reset();
+  if (firstTimer.isReady()) { // выполняется раз в 5мс
+    check_encoder(); // проверяем енкодер
+    check_button(); // проверяем кнопку
+    firstTimer.reset(); // сбрасываем таймер
   }
 }
 
 void read_settings() {
-  EEPROM.begin(EEPROM_SIZE);
-
   if (EEPROM.read(EEPROM_SLAVE_ID) == 0xff || EEPROM.read(EEPROM_BAUDRATE) == 0xff) {
     init_settings();
   }
 
   EEPROM.get(EEPROM_SLAVE_ID, slaveId);
   EEPROM.get(EEPROM_BAUDRATE, baudrateValue);
-
 }
 
 void write_settings(uint8_t eepromm_address, uint16_t val) {
@@ -91,6 +92,8 @@ void modbus_setup() {
   mb.begin(&Serial, FLOW_PIN); // включаем контроль направления приёма/передачи
 
   mb.slave(slaveId);
+
+  // описываем регистры
   mb.addHreg(REG_ENCODER);
   mb.addHreg(REG_BUTTON_COUNT);
   mb.addHreg(REG_SLAVE_ID);
@@ -103,13 +106,12 @@ void modbus_setup() {
   mb.Hreg(REG_BAUDRATE, baudrateValue);
   mb.Coil(REG_BUTTON, 0);
 
-//  mb.addHreg(99); //debug
-//  mb.Hreg(99, 0);
-
+  // описываем колбек функцию, которая будет вызвана при записи регистров адреса и скорости подключения
   mb.onSetHreg(REG_SLAVE_ID, callback_set);
   mb.onSetHreg(REG_BAUDRATE, callback_set);
 }
 
+// колбек функция в которой мы записываем полученные по Modbus регистры в EEPROMM
 uint16_t callback_set(TRegister* reg, uint16_t val) {
 
   switch (reg->address.address) {
@@ -128,6 +130,7 @@ uint16_t callback_set(TRegister* reg, uint16_t val) {
   return val;
 }
 
+// функция, которая находит вхождение числа в массив
 bool contains(uint16_t a, uint16_t arr[], uint8_t arr_size) {
   for (uint8_t i = 0; i < arr_size; i++) if (a == arr[i]) return true;
   return false;
@@ -147,6 +150,15 @@ void check_button() {
   }
 
   buttonWasUp = digitalRead(PIN_BUTTON); // сохраняем флаг, что кнопка отпущена
+}
+
+void check_reset_uart_button() {
+  if (!digitalRead(PIN_RESET_UART_BUTTON)) {
+    delay(2000); // задержка в 2 секунды, чтобы исключить случайный сброс настроек устройства
+    if (!digitalRead(PIN_RESET_UART_BUTTON)) {
+      init_settings();
+    }
+  }
 }
 
 void check_encoder() {
