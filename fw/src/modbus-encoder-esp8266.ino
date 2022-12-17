@@ -1,56 +1,81 @@
-/*
-  Прошивка для платы ESP8266, в других платах надо будет изменить
-  конфигурацию пинов Дополнительно установить библиотеки: modbus-esp8266 и
-  SimpleTimer
-*/
+// Библиотеки
+#include <ModbusRTU.h>    // modbus-esp8266
+#include <EEPROM.h>       // работа с EEPROM
+#include <SimpleTimer.h>  // порстой таймер
 
-#include <ModbusRTU.h>
-#include <SimpleTimer.h>
-#include <EEPROM.h>
+// Значение параметров связи по умолчанию
+#define DEFAULT_MB_ADDRESS    1  // адрес нашего сервера
+#define DEFAULT_MB_STOP_BITS  2  // количество стоповых битов
+#define DEFAULT_MB_BAUDRATE   96 // скорость подключения/100
 
-// системные настройки
-#define EEPROM_SIZE 3
-#define EEPROM_SLAVE_ID 0
-#define EEPROM_BAUDRATE 1
+// Настройки энкодера по умолчанию
+#define DEFAULT_ENC_STEP      10  // шаг изменения положения
+#define DEFAULT_ENC_MIN       0   // минимальное значение
+#define DEFAULT_ENC_MAX       100 // максимальное значение
 
-// адреса Modbus регистров
-#define REG_BUTTON 0       // состояние кнопки
-#define REG_BUTTON_COUNT 1 // счётчик нажатий на кнопку
-#define REG_ENCODER 2      // состояние энкодера
-#define REG_SLAVE_ID 128 // modbus адрес
-#define REG_BAUDRATE 110 // скорость подключения modbus
+#define FLOW_PIN 4 // пин контроля направления приёма/передачи,
+// если в вашем преобразователе UART-RS485 такого нет —
+// закоменнтируйте строку
 
-// конфигурация пинов
-#define FLOW_PIN 4 // D2 пин контроля направления приёма/передачи
+// Номера Modbus регистров
+#define REG_MB_ADDRESS    100 // адрес устройства на шине
+#define REG_MB_STOP_BITS  101 // количество стоповых битов
+#define REG_MB_BAUDRATE   102 // скорость подключения
+
+// Номера регистров энкодера
+#define REG_ENC_BUTTON        0 // состояние кнопки
+#define REG_ENC_BUTTON_COUNT  1 // счётчик нажатий кнопки
+#define REG_ENCODER           2 // регистр текущего положения
+#define REG_ENC_STEP          3 // шаг изменения переменной положения энкодера
+#define REG_ENC_MIN           4 // минимальное значение энкодера
+#define REG_ENC_MAX           5 // максимальное значение энкодера
+
+/* Настройки EEPROM */
+// так как записывать в EEPROM будем числа типа uint16_t и int16_t,
+// которые на ESP8266/ESP32 занимают 4 байта, то каждое значение займёт две ячейки
+#define EEPROM_SIZE           12 // мы займём 12 ячеек памяти
+#define EEPROM_MB_ADDRESS     0 // адрес устройства
+#define EEPROM_MB_STOP_BITS   2 // стоп-биты
+#define EEPROM_MB_BAUDRATE    4 // скорость подключения
+
+#define EEPROM_ENC_STEP       6 // шаг энкодера
+#define EEPROM_ENC_MIN        8 // минимальное значение энкодера
+#define EEPROM_ENC_MAX        10 // максимальное значение энкодера
+
+/* Описание входов */
+#define BTN_SAFE_MODE 14 // D5 на NodeMCU. Кнопка сброса настроек подключения
 #define PIN_A 12      // D6 сигнал A энкодера
 #define PIN_B 13      // D7 сигнал B энкодера
-#define PIN_BUTTON 14 // D5 состояние кнопки
-#define PIN_RESET_UART_BUTTON PIN_BUTTON // сброс настроек UART: скорость и адрес
+#define PIN_BUTTON BTN_SAFE_MODE // D5 состояние кнопки
+
+/* Переменные */
+// Связь
+uint16_t mbAddress = DEFAULT_MB_ADDRESS; // modbus адрес устройства
+uint16_t mbStopBits = DEFAULT_MB_STOP_BITS; // количество стоповых битов
+uint16_t mbBaudrate = DEFAULT_MB_BAUDRATE; // скорость подключения modbus
+
+// Энкодер
+volatile bool flagEncBtnPressed = false; // флаг события нажатия на кнопку
+volatile bool flagEncChanged = false;    // флаг события изменения энкодера
+
+uint16_t encBtnCount = 0;
+int16_t encValue = 0;       // значение энкодера
+uint16_t encStep = DEFAULT_ENC_STEP; // шаг, с которым будет изменяться значение энкодера в регистре
+uint16_t encMin = DEFAULT_ENC_MIN;   // минимальное значение
+uint16_t encMax = DEFAULT_ENC_MAX;   // максимальное значение
 
 ModbusRTU mb;
-SimpleTimer firstTimer(5); // запускаем таймер, который будем использовать для
-// опроса кнопок и энкодера
+SimpleTimer sysTimer(5); // запускаем таймер с интервалом 5 мс
 
-uint8_t slaveId = 1; // modbus адрес устройства
-uint16_t baudrateValue = 96; // скорость подключения modbus
-bool buttonWasUp = true; // флаг того, что кнопка отпущена
-int16_t encoderValue = 0;       // значение энкодера
-uint16_t buttonCount = 0;        // счётчик нажатий на кнопку
-uint8_t fadeAmount =
-  10; // шаг, с которым будет изменяться значение энкодера в регистре
-int16_t encoderA, encoderB,
-        encoderAPrev = 0; // состояние сигналов энкодера
+void ICACHE_RAM_ATTR pin_button_pressed();
+void ICACHE_RAM_ATTR pin_b_changed();
 
 void setup() {
-  pinMode(PIN_A, INPUT);
-  pinMode(PIN_B, INPUT);
-  pinMode(PIN_BUTTON, INPUT_PULLUP);
-
-  EEPROM.begin(EEPROM_SIZE);
-
-  check_reset_uart_button(); // проверяем, не нужно ли сбросить настройки UART
-  read_settings(); // читаем настройки и заносим их в переменные
-  modbus_setup(); // инициализируем modbus: описываем подключение, создаём регистры
+  io_setup();               // настраиваем входы/выходы
+  eeprom_setup();           // настраиваем EEPROM
+  check_safe_mode();        // проверяем, не надо ли нам в безопасный режим с дефолтными настройками
+  modbus_setup();           // настраиваем Modbus
+  read_encoder_settings();  // читаем настройки энкодера
 }
 
 void loop() {
@@ -59,127 +84,249 @@ void loop() {
 }
 
 void yield() {
-  if (firstTimer.isReady()) { // выполняется раз в 5мс
-    check_encoder(); // проверяем енкодер
-    check_button(); // проверяем кнопку
-    firstTimer.reset(); // сбрасываем таймер
+  if (sysTimer.isReady()) { // выполняется раз в 5мс
+    check_enc_button(); // проверяем состояние кнопки
+    check_encoder();    // проверяем изменения сигналов энкодера
+    sysTimer.reset(); // сбрасываем таймер
   }
 }
 
-void read_settings() {
-  if (EEPROM.read(EEPROM_SLAVE_ID) == 0xff || EEPROM.read(EEPROM_BAUDRATE) == 0xff) {
-    init_settings();
-  }
-
-  EEPROM.get(EEPROM_SLAVE_ID, slaveId);
-  EEPROM.get(EEPROM_BAUDRATE, baudrateValue);
-}
-
-void write_settings(uint8_t eepromm_address, uint16_t val) {
-  EEPROM.put(eepromm_address, val);
-  EEPROM.commit();
-}
-
-void init_settings() {
-  EEPROM.put(EEPROM_SLAVE_ID, slaveId);
-  EEPROM.put(EEPROM_BAUDRATE, baudrateValue);
-  EEPROM.commit();
+void io_setup() {
+  pinMode(BTN_SAFE_MODE, INPUT_PULLUP);
+  pinMode(PIN_B, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), pin_button_pressed, CHANGE); // нажатие на кнопку
+  attachInterrupt(digitalPinToInterrupt(PIN_B), pin_b_changed, CHANGE); // вращение энкодера
 }
 
 void modbus_setup() {
-  Serial.begin(baudrateValue * 100, SERIAL_8N2); // задаём парамеры связи baudrateValue * 100
+  Serial.begin(convert_baudrate(mbBaudrate), convert_stop_bits_to_config(mbStopBits)); // задаём парамеры связи
   mb.begin(&Serial);
   mb.begin(&Serial, FLOW_PIN); // включаем контроль направления приёма/передачи
+  mb.slave(mbAddress); // указываем адрес нашего сервера
 
-  mb.slave(slaveId);
+  /* Описываем регистры */
+  // настройки связи
+  mb.addHreg(REG_MB_ADDRESS);   // адрес устройства на шине
+  mb.addHreg(REG_MB_STOP_BITS); // стоповые биты
+  mb.addHreg(REG_MB_BAUDRATE);  // скорость подключения
 
-  // описываем регистры
-  mb.addHreg(REG_ENCODER);
-  mb.addHreg(REG_BUTTON_COUNT);
-  mb.addHreg(REG_SLAVE_ID);
-  mb.addHreg(REG_BAUDRATE);
-  mb.addCoil(REG_BUTTON);
+  // энкодер
+  mb.addHreg(REG_ENCODER);          // текущее значение
+  mb.addIsts(REG_ENC_BUTTON);       // состояние кнопки
+  mb.addIreg(REG_ENC_BUTTON_COUNT); // счётчик нажатий
 
-  mb.Hreg(REG_ENCODER, encoderValue);
-  mb.Hreg(REG_BUTTON_COUNT, 0);
-  mb.Hreg(REG_SLAVE_ID, slaveId);
-  mb.Hreg(REG_BAUDRATE, baudrateValue);
-  mb.Coil(REG_BUTTON, 0);
+  mb.addHreg(REG_ENC_STEP); // шаг изменения энкодера
+  mb.addHreg(REG_ENC_MIN);  // минимально возможно значение
+  mb.addHreg(REG_ENC_MAX);  // максимально возможное значение
 
-  // описываем колбек функцию, которая будет вызвана при записи регистров адреса и скорости подключения
-  mb.onSetHreg(REG_SLAVE_ID, callback_set);
-  mb.onSetHreg(REG_BAUDRATE, callback_set);
+  mb.addHreg(96);  //
+  mb.addHreg(97);  //
+  mb.addHreg(98);  //
+  mb.addHreg(99);  //
+
+  // записываем в регистры значения адреса, стоповых битов и скорости
+  mb.Hreg(REG_MB_ADDRESS, mbAddress);
+  mb.Hreg(REG_MB_STOP_BITS, mbStopBits);
+  mb.Hreg(REG_MB_BAUDRATE, mbBaudrate);
+
+  // записываем значения по умолчанию в регистры стостояния энкодера
+  mb.Hreg(REG_ENCODER, encValue);
+  mb.Ists(REG_ENC_BUTTON, 0);
+  mb.Ireg(REG_ENC_BUTTON_COUNT, encBtnCount);
+
+  // записываем значения по умолчанию в регистры настроек энкодера
+  mb.Hreg(REG_ENC_STEP, encStep);
+  mb.Hreg(REG_ENC_MIN, encMin);
+  mb.Hreg(REG_ENC_MAX, encMax);
+
+  // описываем колбек функцию, которая будет вызвана при записи регистров
+  // параметров подключения
+
+  /*Назначение колбек функций на изменение регистров*/
+  // параметры связи
+  mb.onSetHreg(REG_MB_ADDRESS, callback_set_mb_reg);
+  mb.onSetHreg(REG_MB_STOP_BITS, callback_set_mb_reg);
+  mb.onSetHreg(REG_MB_BAUDRATE, callback_set_mb_reg);
+
+  // настройки энкодера
+  mb.onSetHreg(REG_ENCODER, callback_set_enc_reg);
+  mb.onSetHreg(REG_ENC_STEP, callback_set_enc_reg);
+  mb.onSetHreg(REG_ENC_MIN, callback_set_enc_reg);
+  mb.onSetHreg(REG_ENC_MAX, callback_set_enc_reg);
 }
 
-// колбек функция в которой мы записываем полученные по Modbus регистры в EEPROMM
-uint16_t callback_set(TRegister* reg, uint16_t val) {
+// Фукнция настройки параметров EEPROM
+void eeprom_setup() {
+  EEPROM.begin(EEPROM_SIZE);
+}
 
+// Фукнция чтения настроек Modbus: сперва читаем из EEPROM,
+// а если там пусто, то берём значения по умолчанию
+void read_modbus_settings() {
+  EEPROM.get(EEPROM_MB_ADDRESS, mbAddress);
+  if (mbAddress == 0xffff) {
+    mbAddress = DEFAULT_MB_ADDRESS;
+  }
+
+  EEPROM.get(EEPROM_MB_STOP_BITS, mbStopBits);
+  if (mbStopBits == 0xffff) {
+    mbStopBits = DEFAULT_MB_STOP_BITS;
+  }
+
+  EEPROM.get(EEPROM_MB_BAUDRATE, mbBaudrate);
+  if (mbBaudrate == 0xffff) {
+    mbBaudrate = DEFAULT_MB_BAUDRATE;
+  };
+}
+
+// чтение настроек энкодера из EEPROM
+void read_encoder_settings() {
+  EEPROM.get(EEPROM_ENC_STEP, encStep);
+  if (encStep == 0xffff) {
+    encStep = DEFAULT_ENC_STEP;
+  }
+
+  EEPROM.get(EEPROM_ENC_MIN, encMin);
+  if (encMin == 0xffff) {
+    encMin = DEFAULT_ENC_MIN;
+  }
+
+  EEPROM.get(EEPROM_ENC_MAX, encMax);
+  if (encMax == 0xffff) {
+    encMax = DEFAULT_ENC_MAX;
+  }
+}
+
+void pin_button_pressed() {
+  flagEncBtnPressed = true;
+}
+
+void pin_b_changed() {
+  flagEncChanged = true;
+}
+
+void check_safe_mode() {
+  if (digitalRead(BTN_SAFE_MODE)) { // Если нажата кнопка безопасного режима, то не считываем настройки связи из EEPROM
+    read_modbus_settings();
+  }
+}
+
+// проверка флага нажатия кнопки и обработчик события
+void check_enc_button() {
+  if (flagEncBtnPressed) {
+    bool btnState = !digitalRead(PIN_BUTTON); // считываем состояние кнопки
+
+    mb.Ists(REG_ENC_BUTTON, btnState); // записываем состояние кнопки в регистр
+
+    if (btnState) { // если кнопка нажата
+      encBtnCount++; // увеличиваем счётчик нажатий
+      mb.Ireg(REG_ENC_BUTTON_COUNT, encBtnCount); // записываем счётчик нажатий в регистр
+    }
+    flagEncBtnPressed = false; // сбрасываем флаг
+  }
+}
+
+// проверка флага вращения вала энкодера и обработчик события
+void check_encoder() {
+  if (flagEncChanged) {
+    // в зависимости от направления уменьшаем или увеличиваем значение переменной энкодера
+    encValue += (digitalRead(PIN_B) == digitalRead(PIN_A) ? encStep : -encStep);
+
+    if (encValue > encMax) {
+      encValue = encMax;
+    };
+    if (encValue < encMin) {
+      encValue = encMin;
+    };
+
+    mb.Hreg(REG_ENCODER, encValue); // записываем значение в регистр
+    flagEncChanged = false; // сбрасываем флаг
+  }
+}
+
+// Колбек функция в которой мы записываем полученные по Modbus регистры в EEPROMM.
+// Не забываем проверять записываемые значения на корректность, иначе мы можем потерять
+// связь с устройством
+uint16_t callback_set_mb_reg(TRegister* reg, uint16_t val) {
   switch (reg->address.address) {
-    case REG_SLAVE_ID:
-      if (val > 0 && val < 247) {
-        write_settings(EEPROM_SLAVE_ID, val);
+    case REG_MB_ADDRESS: // если записываем регистр с адресом
+      if (val > 0 && val < 247) { // проверяем, что записываемое число корректно
+        write_eeprom(EEPROM_MB_ADDRESS, val); // записываем значение в EEPROM
+      } else {
+        val = reg->value;
       }
       break;
-    case REG_BAUDRATE:
+    case REG_MB_STOP_BITS: // если регистр со стоповыми битами
+      if (val == 1 || val == 2) {
+        write_eeprom(EEPROM_MB_STOP_BITS, val);
+      } else {
+        val = reg->value;
+      }
+      break;
+    case REG_MB_BAUDRATE: // если регистр со скоростью
       uint16_t correctBaudRates[] = {12, 24, 48, 96, 192, 384, 576, 1152};
       if (contains(val, correctBaudRates, 8)) {
-        write_settings(EEPROM_BAUDRATE, val);
+        write_eeprom(EEPROM_MB_BAUDRATE, val);
+      } else {
+        val = reg->value;
       }
       break;
   }
   return val;
 }
 
-// функция, которая находит вхождение числа в массив
+// Колбек функция, где мы обрабатываем запись в значений в регистр
+uint16_t callback_set_enc_reg(TRegister* reg, uint16_t val) {
+  switch (reg->address.address) {
+    case REG_ENCODER: // регистр со значением энкодера
+      if (val >= encMin && val <= encMax) {
+        encValue = val; // мы только меняем текущее его состояние в программе, но не пишем это значение в EEPROM
+      } else {
+        val = reg->value;
+      }
+      break;
+    case REG_ENC_STEP: // регистр с шагом
+      if (val > 0) {
+        encStep = val;
+        write_eeprom(EEPROM_ENC_STEP, encStep);
+      } else {
+        val = reg->value;
+      }
+    case REG_ENC_MIN: // регистр с минимумом
+      encMin = val;
+      write_eeprom(EEPROM_ENC_MIN, encMin);
+      break;
+    case REG_ENC_MAX: // регистр с минимумом
+      encMax = val;
+      write_eeprom(EEPROM_ENC_MIN, encMax);
+      break;
+  }
+  return val;
+}
+
+// запись значения в EEPROM
+void write_eeprom(uint8_t eepromm_address, uint16_t val) {
+  EEPROM.put(eepromm_address, val);
+  EEPROM.commit();
+}
+
+// Конвертер стоповых битов в настройки типа SerialConfig.
+// Я не стал реализовывать все возможные варианты
+// и давать настраивать чётность и количество битов данных, так как
+// почти никто эти параметры при работе по протоколу Modbus не меняет
+SerialConfig convert_stop_bits_to_config(uint16_t stopBits) {
+  return (stopBits == 2) ? SERIAL_8N2 : SERIAL_8N1;
+}
+
+// Конвертер значения скорости. Для экономии места во флеше и регистрах, мы храним
+// значение скорости, делённое на 100. То есть вместо 9600, мы храним 96.
+// Эта функция умножает значение на 100.
+uint32_t convert_baudrate(uint16_t baudrateValue) {
+  return baudrateValue * 100;
+}
+
+// Функция, которая находит вхождение числа в массив
 bool contains(uint16_t a, uint16_t arr[], uint8_t arr_size) {
   for (uint8_t i = 0; i < arr_size; i++) if (a == arr[i]) return true;
   return false;
-}
-
-void check_button() {
-  if (buttonWasUp && !digitalRead(PIN_BUTTON)) {
-    buttonCount++; // увеличиваем счётчик нажатий
-
-    mb.Coil(REG_BUTTON, 1); // записываем в регистр состояния кнопка 1
-    mb.Hreg(REG_BUTTON_COUNT,
-            buttonCount); // записываем в регистр значение счётчика нажатий
-  } else {
-    if (buttonWasUp) {
-      mb.Coil(REG_BUTTON, 0); // записываем в регистр состояния кнопка 0
-    }
-  }
-
-  buttonWasUp = digitalRead(PIN_BUTTON); // сохраняем флаг, что кнопка отпущена
-}
-
-void check_reset_uart_button() {
-  if (!digitalRead(PIN_RESET_UART_BUTTON)) {
-    delay(2000); // задержка в 2 секунды, чтобы исключить случайный сброс настроек устройства
-    if (!digitalRead(PIN_RESET_UART_BUTTON)) {
-      init_settings();
-    }
-  }
-}
-
-void check_encoder() {
-  encoderA = digitalRead(PIN_A); // проверяем сигнал A
-  encoderB = digitalRead(PIN_B); // проверяем сигнал B
-
-  if ((!encoderA) &&
-      (encoderAPrev)) { //   //если уровень сигнала А низкий, и в предыдущем
-    //   цикле он был высокий
-    if (encoderB) {
-      // вращение по часовой стрелке — увеличиваем значение в регистре
-      if (encoderValue + fadeAmount <= 100)
-        encoderValue += fadeAmount;
-    } else {
-      // вращение против часовой стрелки — уменьшаем значение в регистре
-      if (encoderValue - fadeAmount >= 0)
-        encoderValue -= fadeAmount;
-    }
-  }
-
-  encoderAPrev =
-    encoderA; // сохраняем состояние сигнала A для следующего цикла
-  mb.Hreg(REG_ENCODER, encoderValue); // отправляем текущее значение энкодера
 }
